@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GO RIDES — Phulera GPS Demo</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{--blue:#1769e0;--ink:#0f172a;--muted:#64748b;--line:#dbe3ef}
+*{box-sizing:border-box}body{margin:0;background:#f3f6fb;color:var(--ink);font:16px system-ui,-apple-system,Segoe UI,sans-serif}
+.wrap{max-width:760px;margin:auto;padding:16px}.head{display:flex;align-items:center;gap:12px;margin:8px 0 18px}.logo{width:48px;height:48px;border-radius:16px;background:var(--blue);display:grid;place-items:center;color:#fff;font-size:25px}.brand{font-size:24px;font-weight:900;letter-spacing:-.5px}.brand span{color:var(--blue)}.sub{font-size:13px;color:var(--muted)}
+.panel{background:white;border:1px solid var(--line);border-radius:18px;padding:16px;margin-bottom:14px;box-shadow:0 4px 18px #0f172a08}
+h2{font-size:19px;margin:0 0 5px}.muted{color:var(--muted);font-size:13px;line-height:1.5}
+button{border:0;border-radius:12px;padding:12px 14px;background:var(--blue);color:white;font-weight:750;cursor:pointer;width:100%;margin-top:9px}
+button.secondary{background:white;color:var(--ink);border:1px solid var(--line)}button:disabled{opacity:.5;cursor:wait}
+#map{height:360px;border-radius:14px;overflow:hidden;margin-top:12px;border:1px solid var(--line)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0}.stat{padding:13px;background:#eff6ff;border-radius:12px}.label{font-size:12px;color:var(--muted)}.value{font-size:21px;font-weight:850;margin-top:3px;overflow-wrap:anywhere}
+.loc{font-size:14px;overflow-wrap:anywhere;margin-top:6px}.notice{background:#fff7ed;border:1px solid #fed7aa;padding:11px;border-radius:12px;font-size:13px;line-height:1.5}
+#status{margin-top:10px;font-size:13px;line-height:1.5;color:#334155}.leaflet-container{font:14px system-ui,sans-serif}
+@media(max-width:420px){.wrap{padding:11px}#map{height:320px}.grid{gap:8px}.value{font-size:18px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="head"><div class="logo">🏍️</div><div><div class="brand">GO <span>RIDES</span></div><div class="sub">Phulera bike ride · GPS + route-distance demo</div></div></header>
+  <section class="panel">
+    <h2>Apni ride set karo</h2><div class="muted">1) GPS se pickup lo. 2) Map par tap karke drop point chuno. 3) Road distance calculate karo.</div>
+    <button id="gps">📍 Use My Current Location</button>
+    <button id="dropmode" class="secondary">🏁 Map par Drop Location Chuno</button>
+    <div id="map" aria-label="Map"></div>
+    <div class="grid">
+      <div class="stat"><div class="label">PICKUP</div><div class="value" id="pickupTitle">Not set</div><div class="loc" id="pickupCoords">GPS permission required</div></div>
+      <div class="stat"><div class="label">DROP</div><div class="value" id="dropTitle">Not set</div><div class="loc" id="dropCoords">Map par tap karein</div></div>
+      <div class="stat"><div class="label">ROAD DISTANCE</div><div class="value" id="distance">— km</div></div>
+      <div class="stat"><div class="label">ESTIMATED FARE</div><div class="value" id="fare">—</div><div class="label">Demo formula: ₹25 + ₹6.40/km, minimum ₹30</div></div>
+    </div>
+    <button id="route">🛣️ Calculate Road Distance</button>
+    <div id="status" role="status">Ready. GPS ke liye permission allow karein. Map par tap karne se drop point set hoga.</div>
+  </section>
+  <section class="panel">
+    <div class="notice"><b>Demo limitations:</b> Yeh ek test web-app hai, real ride-booking backend nahi. GPS browser permission aur HTTPS par kaam karta hai. Route calculation OSRM public demo service par depend karti hai, jo kabhi unavailable ho sakti hai. OSM map/data attribution neeche diya gaya hai.</div>
+    <button id="openOSM" class="secondary">Open route in OpenStreetMap</button>
+    <div class="muted" style="margin-top:10px">Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a> · Routing by OSRM demo service</div>
+  </section>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(() => {
+ const $=id=>document.getElementById(id);
+ const map=L.map('map').setView([26.874,75.241],14);
+ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap contributors'}).addTo(map);
+ let pickup=null,drop=null,pickMarker=null,dropMarker=null,routeLine=null,chooseDrop=false;
+ const fmt=p=>p.lat.toFixed(5)+', '+p.lng.toFixed(5);
+ function status(s){$('status').textContent=s}
+ function marker(kind,p){
+   if(kind==='pickup'){
+     if(pickMarker)map.removeLayer(pickMarker);
+     pickMarker=L.marker(p).addTo(map).bindPopup('Pickup location');
+     $('pickupTitle').textContent='GPS location';$('pickupCoords').textContent=fmt(p);
+   }else{
+     if(dropMarker)map.removeLayer(dropMarker);
+     dropMarker=L.marker(p).addTo(map).bindPopup('Drop location');
+     $('dropTitle').textContent='Selected on map';$('dropCoords').textContent=fmt(p);
+   }
+ }
+ $('gps').addEventListener('click',()=>{
+   if(!navigator.geolocation){status('Is browser mein GPS/geolocation available nahi hai.');return}
+   $('gps').disabled=true;status('GPS location dhoondh rahe hain…');
+   navigator.geolocation.getCurrentPosition(pos=>{
+     pickup={lat:pos.coords.latitude,lng:pos.coords.longitude};
+     marker('pickup',pickup);map.setView(pickup,16);$('gps').disabled=false;
+     status('Pickup GPS se set ho gaya. Ab “Map par Drop Location Chuno” dabakar map par destination tap karein.');
+   },err=>{
+     $('gps').disabled=false;
+     const msg={1:'Location permission deny hui. Browser settings mein Location allow karein.',2:'Location abhi available nahi. GPS/Location Services on karke dobara try karein.',3:'GPS request timeout hui. Dobara try karein.'};
+     status(msg[err.code]||'GPS location nahi mil saki. HTTPS page par dobara try karein.');
+   },{enableHighAccuracy:true,timeout:20000,maximumAge:10000});
+ });
+ $('dropmode').addEventListener('click',()=>{chooseDrop=true;status('Ab map par drop location par tap karein.');});
+ map.on('click',e=>{
+   if(!chooseDrop){status('Pehle “Map par Drop Location Chuno” dabayein, phir map par tap karein.');return}
+   drop={lat:e.latlng.lat,lng:e.latlng.lng};marker('drop',drop);chooseDrop=false;
+   status('Drop point set ho gaya. Ab road distance calculate karein.');
+ });
+ async function calc(){
+   if(!pickup||!drop){status('Pehle GPS pickup aur map par drop point set karein.');return}
+   $('route').disabled=true;status('Road route calculate ho raha hai…');
+   try{
+     const url=`https://router.project-osrm.org/route/v1/driving/${pickup.lng},${pickup.lat};${drop.lng},${drop.lat}?overview=full&geometries=geojson`;
+     const res=await fetch(url);if(!res.ok)throw new Error('Routing service response error');
+     const data=await res.json();if(data.code!=='Ok'||!data.routes?.length)throw new Error('Road route nahi mili');
+     const r=data.routes[0],km=r.distance/1000,price=Math.max(30,Math.round(25+km*6.4));
+     $('distance').textContent=km.toFixed(2)+' km';$('fare').textContent='₹'+price;
+     if(routeLine)map.removeLayer(routeLine);
+     routeLine=L.geoJSON({type:'Feature',geometry:r.geometry},{style:{color:'#1769e0',weight:5,opacity:.85}}).addTo(map);
+     map.fitBounds(routeLine.getBounds(),{padding:[25,25]});
+     status('Road distance mil gayi. Fare demo estimate hai; actual fare alag ho sakta hai.');
+   }catch(e){status('Distance calculate nahi hui: routing service/network unavailable ho sakta hai. Internet check karke dobara try karein.')}
+   finally{$('route').disabled=false}
+ }
+ $('route').addEventListener('click',calc);
+ $('openOSM').addEventListener('click',()=>{
+   if(!pickup||!drop){status('Pehle pickup aur drop dono set karein.');return}
+   const url=`https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=${pickup.lat}%2C${pickup.lng}%3B${drop.lat}%2C${drop.lng}`;
+   window.open(url,'_blank','noopener');
+ });
+})();
+</script>
+</body>
+</html>
